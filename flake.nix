@@ -32,8 +32,6 @@
           pname = "weebcentral-downloader";
           fsHelperName = "start-flaresolverr";
           fsPyHelperName = "start-flaresolverr-py";
-          flaresolverrExe = pkgs.lib.getExe pkgs.flaresolverr;
-          curlExe = pkgs.lib.getExe pkgs.curl;
         in
         {
           default = pkgs.stdenv.mkDerivation {
@@ -68,7 +66,7 @@
 
               health_url="http://127.0.0.1:8191/health"
 
-              if ${curlExe} -fsS "$health_url" >/dev/null 2>&1; then
+              if curl -fsS "$health_url" >/dev/null 2>&1; then
                 exit 0
               fi
 
@@ -76,12 +74,12 @@
               mkdir -p "$state_dir"
 
               log_file="$state_dir/flaresolverr.log"
-              ${flaresolverrExe} >"$log_file" 2>&1 &
+              flaresolverr >"$log_file" 2>&1 &
               fs_pid=$!
 
               for _ in 1 2 3 4 5 6 7 8 9 10; do
                 sleep 1
-                if ${curlExe} -fsS "$health_url" >/dev/null 2>&1; then
+                if curl -fsS "$health_url" >/dev/null 2>&1; then
                   exit 0
                 fi
 
@@ -124,6 +122,9 @@
 
             postFixup = ''
               wrapQtApp $out/bin/${pname}
+              wrapProgram $out/bin/${pname} --prefix PATH : ${pkgs.lib.makeBinPath [ pkgs.curl pkgs.flaresolverr ]}
+              wrapProgram $out/bin/${pname}-cli --prefix PATH : ${pkgs.lib.makeBinPath [ pkgs.curl pkgs.flaresolverr ]}
+              wrapProgram $out/bin/${fsPyHelperName} --prefix PATH : ${pkgs.lib.makeBinPath [ pkgs.curl pkgs.flaresolverr ]}
             '';
 
             meta = with pkgs.lib; {
