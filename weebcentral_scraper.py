@@ -73,7 +73,7 @@ def build_arg_parser():
     parser = argparse.ArgumentParser(
         description="Download manga chapters from WeebCentral."
     )
-    parser.add_argument("manga_url", nargs="?", help="WeebCentral manga URL")
+    parser.add_argument("manga_urls", nargs="*", help="One or more WeebCentral manga URLs")
     parser.add_argument(
         "-c",
         "--chapters",
@@ -119,7 +119,7 @@ def build_arg_parser():
 
 def prompt_for_interactive_args(args):
     """Collect scraper options using the legacy interactive prompts."""
-    manga_url = args.manga_url or input("Enter the manga URL: ")
+    manga_url = input("Enter the manga URL: ")
 
     if args.chapters is _UNSET:
         chapter_select = input(
@@ -1123,7 +1123,20 @@ if __name__ == "__main__":
     if args.threads is _UNSET:
         args.threads = 4
 
-    if args.manga_url is None:
+    def build_scraper_kwargs(source_args):
+        return {
+            "chapter_range": source_args.chapters,
+            "output_dir": source_args.output_dir,
+            "delay": source_args.delay,
+            "max_threads": source_args.threads,
+            "convert_to_pdf": source_args.pdf,
+            "convert_to_cbz": source_args.cbz,
+            "convert_to_epub": source_args.epub,
+            "merge_chapters": source_args.merge_chapters,
+            "delete_images_after_conversion": source_args.delete_images_after_conversion,
+        }
+
+    if not args.manga_urls:
         interactive_args = prompt_for_interactive_args(args)
         scraper = WeebCentralScraper(
             manga_url=interactive_args["manga_url"],
@@ -1139,17 +1152,11 @@ if __name__ == "__main__":
         )
         raise SystemExit(0 if scraper.run() else 1)
 
-    scraper = WeebCentralScraper(
-        manga_url=args.manga_url,
-        chapter_range=args.chapters,
-        output_dir=args.output_dir,
-        delay=args.delay,
-        max_threads=args.threads,
-        convert_to_pdf=args.pdf,
-        convert_to_cbz=args.cbz,
-        convert_to_epub=args.epub,
-        merge_chapters=args.merge_chapters,
-        delete_images_after_conversion=args.delete_images_after_conversion,
-    )
+    exit_code = 0
+    scraper_kwargs = build_scraper_kwargs(args)
+    for manga_url in args.manga_urls:
+        scraper = WeebCentralScraper(manga_url=manga_url, **scraper_kwargs)
+        if not scraper.run():
+            exit_code = 1
 
-    raise SystemExit(0 if scraper.run() else 1)
+    raise SystemExit(exit_code)
