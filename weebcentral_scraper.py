@@ -71,7 +71,7 @@ def build_arg_parser():
     parser = argparse.ArgumentParser(
         description="Download manga chapters from WeebCentral."
     )
-    parser.add_argument("manga_url", help="WeebCentral manga URL")
+    parser.add_argument("manga_url", nargs="?", help="WeebCentral manga URL")
     parser.add_argument(
         "-c",
         "--chapters",
@@ -113,6 +113,39 @@ def build_arg_parser():
         help="Delete chapter images after conversion",
     )
     return parser
+
+
+def prompt_for_interactive_args():
+    """Collect scraper options using the legacy interactive prompts."""
+    manga_url = input("Enter the manga URL: ")
+
+    chapter_select = input(
+        "Enter chapter selection (default: all):\n"
+        "- Single chapter: '5' or '23.5'\n"
+        "- Range: '1-10' or '5.5-15.5'\n"
+        "- All chapters: press Enter\n"
+        "Your choice: "
+    ).strip()
+
+    chapter_range = parse_chapter_selection(chapter_select)
+
+    output_dir = input("Enter output directory (default: downloads): ") or "downloads"
+    delay = float(input("Enter delay between chapters in seconds (default: 1.0): ") or "1.0")
+    max_threads = int(input("Enter maximum number of download threads (default: 4): ") or "4")
+    convert_to_pdf_choice = input("Convert chapters to PDF? (y/n, default: n): ").lower() == 'y'
+    convert_to_cbz_choice = input("Convert chapters to CBZ? (y/n, default: n): ").lower() == 'y'
+    delete_images_choice = input("Delete images after conversion? (y/n, default: n): ").lower() == 'y'
+
+    return {
+        "manga_url": manga_url,
+        "chapter_range": chapter_range,
+        "output_dir": output_dir,
+        "delay": delay,
+        "max_threads": max_threads,
+        "convert_to_pdf": convert_to_pdf_choice,
+        "convert_to_cbz": convert_to_cbz_choice,
+        "delete_images_after_conversion": delete_images_choice,
+    }
 
 class WeebCentralScraper:
     def __init__(self, manga_url, chapter_range=None, output_dir="downloads", delay=1.0, max_threads=4, convert_to_pdf=False, convert_to_cbz=False, convert_to_epub=False, merge_chapters=False, delete_images_after_conversion=False):
@@ -1052,6 +1085,20 @@ img{{max-width:100%;max-height:100vh;object-fit:contain;}}</style>
 
 if __name__ == "__main__":
     args = build_arg_parser().parse_args()
+
+    if args.manga_url is None:
+        interactive_args = prompt_for_interactive_args()
+        scraper = WeebCentralScraper(
+            manga_url=interactive_args["manga_url"],
+            chapter_range=interactive_args["chapter_range"],
+            output_dir=interactive_args["output_dir"],
+            delay=interactive_args["delay"],
+            max_threads=interactive_args["max_threads"],
+            convert_to_pdf=interactive_args["convert_to_pdf"],
+            convert_to_cbz=interactive_args["convert_to_cbz"],
+            delete_images_after_conversion=interactive_args["delete_images_after_conversion"],
+        )
+        raise SystemExit(0 if scraper.run() else 1)
 
     scraper = WeebCentralScraper(
         manga_url=args.manga_url,
