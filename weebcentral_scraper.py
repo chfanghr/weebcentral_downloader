@@ -19,6 +19,8 @@ from ebooklib import epub
 import random
 from threading import Lock
 
+_UNSET = object()
+
 # Set up logging
 logging.basicConfig(
     level=logging.INFO,
@@ -75,28 +77,28 @@ def build_arg_parser():
     parser.add_argument(
         "-c",
         "--chapters",
-        default="all",
+        default=_UNSET,
         type=parse_chapter_selection,
         help="Chapter selection: all, a single chapter like 5, or a range like 1-10",
     )
     parser.add_argument(
         "-o",
         "--output-dir",
-        default="downloads",
+        default=_UNSET,
         help="Output directory",
     )
     parser.add_argument(
         "-d",
         "--delay",
         type=float,
-        default=1.0,
+        default=_UNSET,
         help="Delay between chapter downloads in seconds",
     )
     parser.add_argument(
         "-t",
         "--threads",
         type=int,
-        default=4,
+        default=_UNSET,
         help="Maximum number of download threads per chapter",
     )
     parser.add_argument("--pdf", action="store_true", help="Convert chapters to PDF")
@@ -115,26 +117,50 @@ def build_arg_parser():
     return parser
 
 
-def prompt_for_interactive_args():
+def prompt_for_interactive_args(args):
     """Collect scraper options using the legacy interactive prompts."""
-    manga_url = input("Enter the manga URL: ")
+    manga_url = args.manga_url or input("Enter the manga URL: ")
 
-    chapter_select = input(
-        "Enter chapter selection (default: all):\n"
-        "- Single chapter: '5' or '23.5'\n"
-        "- Range: '1-10' or '5.5-15.5'\n"
-        "- All chapters: press Enter\n"
-        "Your choice: "
-    ).strip()
+    if args.chapters is _UNSET:
+        chapter_select = input(
+            "Enter chapter selection (default: all):\n"
+            "- Single chapter: '5' or '23.5'\n"
+            "- Range: '1-10' or '5.5-15.5'\n"
+            "- All chapters: press Enter\n"
+            "Your choice: "
+        ).strip()
+        chapter_range = parse_chapter_selection(chapter_select)
+    else:
+        chapter_range = args.chapters
 
-    chapter_range = parse_chapter_selection(chapter_select)
+    output_dir = args.output_dir if args.output_dir is not _UNSET else input("Enter output directory (default: downloads): ") or "downloads"
+    delay = args.delay if args.delay is not _UNSET else float(input("Enter delay between chapters in seconds (default: 1.0): ") or "1.0")
+    max_threads = args.threads if args.threads is not _UNSET else int(input("Enter maximum number of download threads (default: 4): ") or "4")
 
-    output_dir = input("Enter output directory (default: downloads): ") or "downloads"
-    delay = float(input("Enter delay between chapters in seconds (default: 1.0): ") or "1.0")
-    max_threads = int(input("Enter maximum number of download threads (default: 4): ") or "4")
-    convert_to_pdf_choice = input("Convert chapters to PDF? (y/n, default: n): ").lower() == 'y'
-    convert_to_cbz_choice = input("Convert chapters to CBZ? (y/n, default: n): ").lower() == 'y'
-    delete_images_choice = input("Delete images after conversion? (y/n, default: n): ").lower() == 'y'
+    if args.pdf:
+        convert_to_pdf_choice = True
+    else:
+        convert_to_pdf_choice = input("Convert chapters to PDF? (y/n, default: n): ").lower() == 'y'
+
+    if args.cbz:
+        convert_to_cbz_choice = True
+    else:
+        convert_to_cbz_choice = input("Convert chapters to CBZ? (y/n, default: n): ").lower() == 'y'
+
+    if args.epub:
+        convert_to_epub_choice = True
+    else:
+        convert_to_epub_choice = False
+
+    if args.merge_chapters:
+        merge_chapters_choice = True
+    else:
+        merge_chapters_choice = False
+
+    if args.delete_images_after_conversion:
+        delete_images_choice = True
+    else:
+        delete_images_choice = input("Delete images after conversion? (y/n, default: n): ").lower() == 'y'
 
     return {
         "manga_url": manga_url,
@@ -144,6 +170,8 @@ def prompt_for_interactive_args():
         "max_threads": max_threads,
         "convert_to_pdf": convert_to_pdf_choice,
         "convert_to_cbz": convert_to_cbz_choice,
+        "convert_to_epub": convert_to_epub_choice,
+        "merge_chapters": merge_chapters_choice,
         "delete_images_after_conversion": delete_images_choice,
     }
 
@@ -1086,8 +1114,17 @@ img{{max-width:100%;max-height:100vh;object-fit:contain;}}</style>
 if __name__ == "__main__":
     args = build_arg_parser().parse_args()
 
+    if args.chapters is _UNSET:
+        args.chapters = None
+    if args.output_dir is _UNSET:
+        args.output_dir = "downloads"
+    if args.delay is _UNSET:
+        args.delay = 1.0
+    if args.threads is _UNSET:
+        args.threads = 4
+
     if args.manga_url is None:
-        interactive_args = prompt_for_interactive_args()
+        interactive_args = prompt_for_interactive_args(args)
         scraper = WeebCentralScraper(
             manga_url=interactive_args["manga_url"],
             chapter_range=interactive_args["chapter_range"],
@@ -1096,6 +1133,8 @@ if __name__ == "__main__":
             max_threads=interactive_args["max_threads"],
             convert_to_pdf=interactive_args["convert_to_pdf"],
             convert_to_cbz=interactive_args["convert_to_cbz"],
+            convert_to_epub=interactive_args["convert_to_epub"],
+            merge_chapters=interactive_args["merge_chapters"],
             delete_images_after_conversion=interactive_args["delete_images_after_conversion"],
         )
         raise SystemExit(0 if scraper.run() else 1)
