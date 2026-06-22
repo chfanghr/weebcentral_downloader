@@ -20,6 +20,7 @@ import random
 from threading import Lock
 
 _UNSET = object()
+DEFAULT_CHECK_THREADS = 8
 
 # Set up logging
 logging.basicConfig(
@@ -101,6 +102,12 @@ def build_arg_parser():
         default=_UNSET,
         help="Maximum number of download threads per chapter",
     )
+    parser.add_argument(
+        "--check-threads",
+        type=int,
+        default=_UNSET,
+        help="Maximum number of threads used to check for existing images",
+    )
     parser.add_argument("--pdf", action="store_true", help="Convert chapters to PDF")
     parser.add_argument("--cbz", action="store_true", help="Convert chapters to CBZ")
     parser.add_argument("--epub", action="store_true", help="Convert chapters to EPUB")
@@ -136,6 +143,7 @@ def prompt_for_interactive_args(args):
     output_dir = args.output_dir if args.output_dir is not _UNSET else input("Enter output directory (default: downloads): ") or "downloads"
     delay = args.delay if args.delay is not _UNSET else float(input("Enter delay between chapters in seconds (default: 1.0): ") or "1.0")
     max_threads = args.threads if args.threads is not _UNSET else int(input("Enter maximum number of download threads (default: 4): ") or "4")
+    check_threads = args.check_threads if args.check_threads is not _UNSET else DEFAULT_CHECK_THREADS
 
     if args.pdf:
         convert_to_pdf_choice = True
@@ -168,6 +176,7 @@ def prompt_for_interactive_args(args):
         "output_dir": output_dir,
         "delay": delay,
         "max_threads": max_threads,
+        "check_threads": check_threads,
         "convert_to_pdf": convert_to_pdf_choice,
         "convert_to_cbz": convert_to_cbz_choice,
         "convert_to_epub": convert_to_epub_choice,
@@ -176,7 +185,7 @@ def prompt_for_interactive_args(args):
     }
 
 class WeebCentralScraper:
-    def __init__(self, manga_url, chapter_range=None, output_dir="downloads", delay=1.0, max_threads=4, convert_to_pdf=False, convert_to_cbz=False, convert_to_epub=False, merge_chapters=False, delete_images_after_conversion=False):
+    def __init__(self, manga_url, chapter_range=None, output_dir="downloads", delay=1.0, max_threads=4, check_threads=DEFAULT_CHECK_THREADS, convert_to_pdf=False, convert_to_cbz=False, convert_to_epub=False, merge_chapters=False, delete_images_after_conversion=False):
         self.base_url = "https://weebcentral.com"
         if not manga_url.startswith(('http://', 'https://')):
             manga_url = 'https://' + manga_url
@@ -186,6 +195,7 @@ class WeebCentralScraper:
         self.delay = float(delay) # Ensure delay is always float
         self.base_delay = float(delay)  # Store original delay
         self.max_threads = max_threads
+        self.check_threads = check_threads
         self.convert_to_pdf = convert_to_pdf
         self.convert_to_cbz = convert_to_cbz
         self.convert_to_epub = convert_to_epub
@@ -539,6 +549,10 @@ class WeebCentralScraper:
             logger.error(f"Failed to download {os.path.basename(filepath)} after {max_retries} attempts: {str(e)}")
             return False
 
+    def _image_exists(self, filepath):
+        """Check whether an image file already exists and is non-empty."""
+        return os.path.exists(filepath) and os.path.getsize(filepath) > 0
+
     def download_chapter(self, chapter):
         """Download all images for a chapter with improved error recovery"""
         if self.stop_flag():
@@ -572,17 +586,37 @@ class WeebCentralScraper:
         downloaded = 0
         if self.progress_callback:
             self.progress_callback(chapter['name'], 0)
-        
+
+        image_jobs = []
+        for index, url in enumerate(image_urls, 1):
+            ext = url.split('.')[-1].lower()
+            if ext not in ['jpg', 'jpeg', 'png', 'webp', 'gif']:
+                ext = 'jpg'
+
+            filepath = os.path.join(chapter_dir, f"{index:03d}.{ext}")
+            image_jobs.append((index, url, filepath))
+
+        with ThreadPoolExecutor(max_workers=min(self.check_threads, len(image_jobs))) as executor:
+            existing_flags = list(executor.map(lambda job: self._image_exists(job[2]), image_jobs))
+
+        pending_jobs = []
+        for (index, url, filepath), exists in zip(image_jobs, existing_flags):
+            if exists:
+                logger.info(f"Skipping {os.path.basename(filepath)} - already exists")
+                downloaded += 1
+            else:
+                pending_jobs.append((index, url, filepath))
+
         with tqdm(total=len(image_urls), desc=f"Chapter {chapter['name']}") as pbar:
+            if downloaded:
+                pbar.update(downloaded)
+                if self.progress_callback:
+                    self.progress_callback(chapter['name'], int(downloaded / len(image_urls) * 100))
+
             with ThreadPoolExecutor(max_workers=self.max_threads) as executor:
                 future_to_url = {}
                 
-                for index, url in enumerate(image_urls, 1):
-                    ext = url.split('.')[-1].lower()
-                    if ext not in ['jpg', 'jpeg', 'png', 'webp', 'gif']:
-                        ext = 'jpg'
-                    
-                    filepath = os.path.join(chapter_dir, f"{index:03d}.{ext}")
+                for index, url, filepath in pending_jobs:
                     future = executor.submit(self.download_image, url, filepath, chapter['url'])
                     future_to_url[future] = url
                     
@@ -1122,6 +1156,8 @@ if __name__ == "__main__":
         args.delay = 1.0
     if args.threads is _UNSET:
         args.threads = 4
+    if args.check_threads is _UNSET:
+        args.check_threads = DEFAULT_CHECK_THREADS
 
     def build_scraper_kwargs(source_args):
         return {
@@ -1129,6 +1165,7 @@ if __name__ == "__main__":
             "output_dir": source_args.output_dir,
             "delay": source_args.delay,
             "max_threads": source_args.threads,
+            "check_threads": source_args.check_threads,
             "convert_to_pdf": source_args.pdf,
             "convert_to_cbz": source_args.cbz,
             "convert_to_epub": source_args.epub,
@@ -1144,6 +1181,7 @@ if __name__ == "__main__":
             output_dir=interactive_args["output_dir"],
             delay=interactive_args["delay"],
             max_threads=interactive_args["max_threads"],
+            check_threads=interactive_args["check_threads"],
             convert_to_pdf=interactive_args["convert_to_pdf"],
             convert_to_cbz=interactive_args["convert_to_cbz"],
             convert_to_epub=interactive_args["convert_to_epub"],
