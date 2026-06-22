@@ -1,3 +1,4 @@
+import argparse
 import requests
 import os
 import re
@@ -38,6 +39,80 @@ def natural_sort_key(text):
         return int(text) if text.isdigit() else text
     
     return [atoi(c) for c in re.split(r'(\d+)', str(text))]
+
+
+def parse_chapter_selection(value):
+    """Parse a chapter selection string into a scraper range value."""
+    if value is None:
+        return None
+
+    value = str(value).strip()
+    if not value or value.lower() == "all":
+        return None
+
+    if "-" in value:
+        try:
+            start, end = map(float, value.split("-", 1))
+            return (start, end)
+        except ValueError as exc:
+            raise argparse.ArgumentTypeError(
+                f"Invalid chapter range: {value!r}. Use a single number or start-end."
+            ) from exc
+
+    try:
+        return float(value)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(
+            f"Invalid chapter selection: {value!r}. Use a single number, start-end, or all."
+        ) from exc
+
+
+def build_arg_parser():
+    parser = argparse.ArgumentParser(
+        description="Download manga chapters from WeebCentral."
+    )
+    parser.add_argument("manga_url", help="WeebCentral manga URL")
+    parser.add_argument(
+        "-c",
+        "--chapters",
+        default="all",
+        type=parse_chapter_selection,
+        help="Chapter selection: all, a single chapter like 5, or a range like 1-10",
+    )
+    parser.add_argument(
+        "-o",
+        "--output-dir",
+        default="downloads",
+        help="Output directory",
+    )
+    parser.add_argument(
+        "-d",
+        "--delay",
+        type=float,
+        default=1.0,
+        help="Delay between chapter downloads in seconds",
+    )
+    parser.add_argument(
+        "-t",
+        "--threads",
+        type=int,
+        default=4,
+        help="Maximum number of download threads per chapter",
+    )
+    parser.add_argument("--pdf", action="store_true", help="Convert chapters to PDF")
+    parser.add_argument("--cbz", action="store_true", help="Convert chapters to CBZ")
+    parser.add_argument("--epub", action="store_true", help="Convert chapters to EPUB")
+    parser.add_argument(
+        "--merge-chapters",
+        action="store_true",
+        help="Merge all downloaded chapters into a single file per format",
+    )
+    parser.add_argument(
+        "--delete-images-after-conversion",
+        action="store_true",
+        help="Delete chapter images after conversion",
+    )
+    return parser
 
 class WeebCentralScraper:
     def __init__(self, manga_url, chapter_range=None, output_dir="downloads", delay=1.0, max_threads=4, convert_to_pdf=False, convert_to_cbz=False, convert_to_epub=False, merge_chapters=False, delete_images_after_conversion=False):
@@ -976,47 +1051,19 @@ img{{max-width:100%;max-height:100vh;object-fit:contain;}}</style>
             return False
 
 if __name__ == "__main__":
-    manga_url = input("Enter the manga URL: ")
-    
-    # Chapter selection
-    chapter_select = input(
-        "Enter chapter selection (default: all):\n"
-        "- Single chapter: '5' or '23.5'\n"
-        "- Range: '1-10' or '5.5-15.5'\n"
-        "- All chapters: press Enter\n"
-        "Your choice: "
-    ).strip()
-    
-    chapter_range = None
-    if chapter_select:
-        if '-' in chapter_select:
-            try:
-                start, end = map(float, chapter_select.split('-'))
-                chapter_range = (start, end)
-            except ValueError:
-                print("Invalid range format. Using all chapters.")
-        else:
-            try:
-                chapter_range = float(chapter_select)
-            except ValueError:
-                print("Invalid chapter number. Using all chapters.")
-    
-    output_dir = input("Enter output directory (default: downloads): ") or "downloads"
-    delay = float(input("Enter delay between chapters in seconds (default: 1.0): ") or "1.0")
-    max_threads = int(input("Enter maximum number of download threads (default: 4): ") or "4")
-    convert_to_pdf_choice = input("Convert chapters to PDF? (y/n, default: n): ").lower() == 'y'
-    convert_to_cbz_choice = input("Convert chapters to CBZ? (y/n, default: n): ").lower() == 'y'
-    delete_images_choice = input("Delete images after conversion? (y/n, default: n): ").lower() == 'y'
-    
+    args = build_arg_parser().parse_args()
+
     scraper = WeebCentralScraper(
-        manga_url=manga_url,
-        chapter_range=chapter_range,
-        output_dir=output_dir,
-        delay=delay,
-        max_threads=max_threads,
-        convert_to_pdf=convert_to_pdf_choice,
-        convert_to_cbz=convert_to_cbz_choice,
-        delete_images_after_conversion=delete_images_choice
+        manga_url=args.manga_url,
+        chapter_range=args.chapters,
+        output_dir=args.output_dir,
+        delay=args.delay,
+        max_threads=args.threads,
+        convert_to_pdf=args.pdf,
+        convert_to_cbz=args.cbz,
+        convert_to_epub=args.epub,
+        merge_chapters=args.merge_chapters,
+        delete_images_after_conversion=args.delete_images_after_conversion,
     )
-    
-    scraper.run()
+
+    raise SystemExit(0 if scraper.run() else 1)
