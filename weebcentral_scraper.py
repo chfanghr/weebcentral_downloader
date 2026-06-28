@@ -249,13 +249,13 @@ class WeebCentralScraper:
         # Find the chapter in the failed list
         for chapter in self.failed_chapters:
             if chapter['name'] == chapter_name:
-                downloaded, chapter_dir = self.download_chapter(chapter)
+                downloaded, chapter_dir, new_downloaded = self.download_chapter(chapter)
                 if downloaded > 0:
                     # Remove from failed list on success
                     self.failed_chapters.remove(chapter)
-                    return True, chapter_dir
-                return False, None
-        return False, None
+                    return True, chapter_dir, new_downloaded
+                return False, None, 0
+        return False, None, 0
     
     def retry_all_failed(self):
         """Retry all failed chapter downloads"""
@@ -266,12 +266,12 @@ class WeebCentralScraper:
         results = []
         
         for chapter in failed_copy:
-            downloaded, chapter_dir = self.download_chapter(chapter)
+            downloaded, chapter_dir, new_downloaded = self.download_chapter(chapter)
             if downloaded > 0:
                 self.failed_chapters.remove(chapter)
-                results.append({'chapter': chapter['name'], 'success': True, 'dir': chapter_dir})
+                results.append({'chapter': chapter['name'], 'success': True, 'dir': chapter_dir, 'new_downloaded': new_downloaded})
             else:
-                results.append({'chapter': chapter['name'], 'success': False, 'dir': None})
+                results.append({'chapter': chapter['name'], 'success': False, 'dir': None, 'new_downloaded': 0})
         
         return results
 
@@ -556,7 +556,7 @@ class WeebCentralScraper:
     def download_chapter(self, chapter):
         """Download all images for a chapter with improved error recovery"""
         if self.stop_flag():
-            return 0, None
+            return 0, None, 0
         
         chapter_name = re.sub(r'[\\/*?:"<>|]', '_', chapter['name'])
         chapter_dir = os.path.join(self.output_dir, chapter_name)
@@ -569,11 +569,11 @@ class WeebCentralScraper:
         except Exception as e:
             logger.error(f"Failed to fetch chapter images for {chapter['name']}: {e}")
             logger.info(f"Skipping chapter {chapter['name']} and continuing with next...")
-            return 0, None
+            return 0, None, 0
         
         if not image_urls:
             logger.warning(f"No images found for chapter: {chapter['name']}")
-            return 0, None
+            return 0, None, 0
             
         logger.info(f"Found {len(image_urls)} images")
         
@@ -584,6 +584,7 @@ class WeebCentralScraper:
         
         # Download images with multiple threads
         downloaded = 0
+        newly_downloaded = 0
         if self.progress_callback:
             self.progress_callback(chapter['name'], 0)
 
@@ -628,13 +629,14 @@ class WeebCentralScraper:
                         break
                     if future.result():
                         downloaded += 1
+                        newly_downloaded += 1
                         pbar.update(1)
                         if self.progress_callback:
                             progress = int((i + 1) / len(image_urls) * 100)
                             self.progress_callback(chapter['name'], progress)
         
         logger.info(f"Downloaded {downloaded}/{len(image_urls)} images for chapter: {chapter['name']}")
-        return downloaded, chapter_dir
+        return downloaded, chapter_dir, newly_downloaded
 
     def create_pdf_from_chapter(self, chapter_dir, chapter_name):
         """Create a PDF from all images in a chapter directory.
@@ -1070,7 +1072,7 @@ img{{max-width:100%;max-height:100vh;object-fit:contain;}}</style>
                     
                     chapter = future_to_chapter[future]
                     try:
-                        downloaded, chapter_dir = future.result()
+                        downloaded, chapter_dir, newly_downloaded = future.result()
                         if downloaded > 0:
                             total_downloaded += downloaded
                             # Reset consecutive failures on success
@@ -1089,7 +1091,11 @@ img{{max-width:100%;max-height:100vh;object-fit:contain;}}</style>
                                 if self.convert_to_pdf and chapter_dir:
                                     self.create_pdf_from_chapter(chapter_dir, chapter['name'])
                                 if self.convert_to_cbz and chapter_dir:
-                                    self.create_cbz_from_chapter(chapter_dir, chapter['name'])
+                                    cbz_path = os.path.join(self.output_dir, f"{chapter['name']}.cbz")
+                                    if newly_downloaded == 0 and os.path.exists(cbz_path):
+                                        logger.info(f"Skipping CBZ creation for chapter {chapter['name']} - all images already exist")
+                                    else:
+                                        self.create_cbz_from_chapter(chapter_dir, chapter['name'])
                                 if self.convert_to_epub and chapter_dir:
                                     self.create_epub_from_chapter(chapter_dir, chapter['name'], manga_title)
                                 
